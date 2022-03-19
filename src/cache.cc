@@ -1,12 +1,12 @@
-#include "cache.h"
+#include "../inc/cache.h"
 
 #include <algorithm>
 #include <iterator>
 
-#include "champsim.h"
-#include "champsim_constants.h"
-#include "util.h"
-#include "vmem.h"
+#include "../inc/champsim.h"
+#include "../inc/champsim_constants.h"
+#include "../inc/util.h"
+#include "../inc/vmem.h"
 
 extern VirtualMemory vmem;
 extern uint8_t warmup_complete[NUM_CPUS];
@@ -241,6 +241,11 @@ void CACHE::readlike_hit(std::size_t set, std::size_t way, PACKET& handle_pkt)
 
 bool CACHE::readlike_miss(PACKET& handle_pkt)
 {
+  if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "LLC") == 0) {
+    for (auto ret : handle_pkt.to_return)
+      ret->return_data(handle_pkt);
+    handle_pkt.to_return.clear();
+  }
   if constexpr (champsim::debug_print) {
     std::cout << "[" << NAME << "] " << __func__ << " miss";
     std::cout << " instr_id: " << handle_pkt.instr_id << " address: " << std::hex << (handle_pkt.address >> OFFSET_BITS);
