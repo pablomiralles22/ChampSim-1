@@ -241,11 +241,6 @@ void CACHE::readlike_hit(std::size_t set, std::size_t way, PACKET& handle_pkt)
 
 bool CACHE::readlike_miss(PACKET& handle_pkt)
 {
-  if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "LLC") == 0) {
-    for (auto ret : handle_pkt.to_return)
-      ret->return_data(handle_pkt);
-    handle_pkt.to_return.clear();
-  }
   if constexpr (champsim::debug_print) {
     std::cout << "[" << NAME << "] " << __func__ << " miss";
     std::cout << " instr_id: " << handle_pkt.instr_id << " address: " << std::hex << (handle_pkt.address >> OFFSET_BITS);
@@ -315,7 +310,12 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
     uint64_t pf_base_addr = (virtual_prefetch ? handle_pkt.v_address : handle_pkt.address) & ~bitmask(match_offset_bits ? 0 : OFFSET_BITS);
     handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 0, handle_pkt.type, handle_pkt.pf_metadata);
   }
-
+  if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "LLC") == 0
+      && (handle_pkt.type & (LOAD | PREFETCH))) {
+    for (auto ret : handle_pkt.to_return)
+      ret->return_data(handle_pkt);
+    handle_pkt.to_return.clear();
+  }
   return true;
 }
 
