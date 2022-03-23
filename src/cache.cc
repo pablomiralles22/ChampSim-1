@@ -86,7 +86,7 @@ void CACHE::handle_writeback()
     }
 
     // remove this entry from WQ
-    writes_available_this_cycle--;
+    // writes_available_this_cycle--;
     WQ.pop_front();
   }
 }
@@ -256,12 +256,6 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
 
   if (mshr_entry != MSHR.end()) // miss already inflight
   {
-    if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "LLC") == 0
-        && (handle_pkt.type == LOAD ||  handle_pkt.type == PREFETCH)) {
-      for (auto ret : handle_pkt.to_return)
-        ret->return_data(handle_pkt);
-      handle_pkt.to_return.clear();
-    }
     // update fill location
     mshr_entry->fill_level = std::min(mshr_entry->fill_level, handle_pkt.fill_level);
 
@@ -302,19 +296,14 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
     if (!success)
       return false;
 
-    if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "LLC") == 0
-        && (handle_pkt.type == LOAD ||  handle_pkt.type == PREFETCH)) {
-      for (auto ret : handle_pkt.to_return)
-        ret->return_data(handle_pkt);
-      handle_pkt.to_return.clear();
-    }
-
     // Allocate an MSHR
     if (handle_pkt.fill_level <= fill_level) {
       auto it = MSHR.insert(std::end(MSHR), handle_pkt);
       it->cycle_enqueued = current_cycle;
       it->event_cycle = std::numeric_limits<uint64_t>::max();
+      mshr_entry = it;
     }
+
   }
 
   // update prefetcher on load instructions and prefetches from upper levels
@@ -323,6 +312,15 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
     uint64_t pf_base_addr = (virtual_prefetch ? handle_pkt.v_address : handle_pkt.address) & ~bitmask(match_offset_bits ? 0 : OFFSET_BITS);
     handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 0, handle_pkt.type, handle_pkt.pf_metadata);
   }
+
+  if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "LLC") == 0 &&
+      mshr_entry != MSHR.end() &&
+      mshr_entry->type != WRITEBACK) {
+    for (auto ret : mshr_entry->to_return)
+      ret->return_data(*mshr_entry);
+    mshr_entry->to_return.clear();
+  }
+
   return true;
 }
 
