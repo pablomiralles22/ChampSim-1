@@ -5,6 +5,7 @@
 #include "cache.h"
 
 constexpr int PREFETCH_DEGREE = 3;
+constexpr int LLC_PREFETCH_DEGREE = 6;
 
 struct tracker_entry {
   uint64_t ip = 0;              // the IP we're tracking
@@ -38,12 +39,17 @@ void CACHE::prefetcher_cycle_operate()
       // level or not
       bool success = prefetch_line(pf_address, (get_occupancy(0, pf_address) < (get_size(0, pf_address) / 2)), 0);
 
-      // Orchestrate LLC ip_stride prefetching
-      if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0)
-        ((CACHE*)((CACHE*)lower_level)->lower_level)->prefetch_line(pf_address, true, 0);
 
-      if (success)
+      if (success) {
         lookahead[this] = {pf_address, stride, degree - 1};
+        // Orchestrate LLC ip_stride prefetching
+        // TODO should I take into account failing to push to LLC's PQ?
+        if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0) {
+          CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
+          auto llc_pf_address = pf_address + (LLC_PREFETCH_DEGREE - PREFETCH_DEGREE) * (stride << LOG2_BLOCK_SIZE);
+          LLC->prefetch_line(llc_pf_address, true, 0);
+        }
+      }
       // If we fail, try again next cycle
     } else {
       lookahead[this] = {};
