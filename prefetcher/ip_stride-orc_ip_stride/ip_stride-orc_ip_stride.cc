@@ -2,10 +2,10 @@
 #include <array>
 #include <map>
 
-#include "cache.h"
+#include "../../inc/cache.h"
 
 constexpr int PREFETCH_DEGREE = 3;
-constexpr int LLC_PREFETCH_DEGREE = 5;
+constexpr int LLC_PREFETCH_EXTRA_DEGREE = 3;
 
 struct tracker_entry {
   uint64_t ip = 0;              // the IP we're tracking
@@ -32,28 +32,29 @@ void CACHE::prefetcher_cycle_operate()
   // If a lookahead is active
   if (auto [old_pf_address, stride, degree] = lookahead[this]; degree > 0) {
     auto pf_address = old_pf_address + (stride << LOG2_BLOCK_SIZE);
-
     // If the next step would exceed the degree or run off the page, stop
     if (virtual_prefetch || (pf_address >> LOG2_PAGE_SIZE) == (old_pf_address >> LOG2_PAGE_SIZE)) {
       // check the MSHR occupancy to decide if we're going to prefetch to this
       // level or not
       bool success = prefetch_line(pf_address, (get_occupancy(0, pf_address) < (get_size(0, pf_address) / 2)), 0);
-
-      // Orchestrate LLC ip_stride prefetching
-      // TODO should I take into account failing to push to LLC's PQ?
-      if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0) {
-        CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
-        auto llc_pf_address = pf_address + (LLC_PREFETCH_DEGREE - PREFETCH_DEGREE) * (stride << LOG2_BLOCK_SIZE);
-        if((llc_pf_address >> LOG2_PAGE_SIZE) == (old_pf_address >> LOG2_PAGE_SIZE)) // do not exceed current page
-          LLC->prefetch_line(llc_pf_address, true, 0);
-      }
-
-      if (success) {
-        lookahead[this] = {pf_address, stride, degree - 1};
-      }
+      if (success) lookahead[this] = {pf_address, stride, degree - 1};
       // If we fail, try again next cycle
-    } else {
-      lookahead[this] = {};
+    } else lookahead[this] = {};
+  }
+
+  // Orchestrate LLC ip_stride prefetching
+  if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0) {
+    CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
+    if (auto [old_pf_address, stride, degree] = lookahead[LLC]; degree > 0) {
+      auto pf_address = old_pf_address + (stride << LOG2_BLOCK_SIZE);
+      // If the next step would exceed the degree or run off the page, stop
+      if (virtual_prefetch || (pf_address >> LOG2_PAGE_SIZE) == (old_pf_address >> LOG2_PAGE_SIZE)) {
+        // check the MSHR occupancy to decide if we're going to prefetch to this
+        // level or not
+        bool success = LLC->prefetch_line(pf_address, true, 0);
+        if (success) lookahead[LLC] = {pf_address, stride, degree - 1};
+        // If we fail, try again next cycle
+      } else lookahead[LLC] = {};
     }
   }
 }
@@ -78,8 +79,17 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
 
     // Initialize prefetch state unless we somehow saw the same address twice in
     // a row or if this is the first time we've seen this stride
-    if (stride != 0 && stride == found->last_stride)
+    if (stride != 0 && stride == found->last_stride) {
       lookahead[this] = {cl_addr, stride, PREFETCH_DEGREE};
+      // add to LLC table, but only prefetch lines of higher degree than the one used in L1
+      if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0) {
+        CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
+        uint64_t llc_cl_addr = cl_addr + (PREFETCH_DEGREE - 1) * (stride << LOG2_BLOCK_SIZE);
+        // do not exceed current page
+        if (virtual_prefetch || (cl_addr >> LOG2_PAGE_SIZE) == (llc_cl_addr >> LOG2_PAGE_SIZE))
+          lookahead[LLC] = {llc_cl_addr, stride, LLC_PREFETCH_EXTRA_DEGREE};
+      }
+    }
   } else {
     // replace by LRU
     found = std::min_element(set_begin, set_end, [](tracker_entry x, tracker_entry y) { return x.last_used_cycle < y.last_used_cycle; });
