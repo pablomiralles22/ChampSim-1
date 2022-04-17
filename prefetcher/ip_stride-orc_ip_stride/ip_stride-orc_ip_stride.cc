@@ -5,7 +5,7 @@
 #include "../../inc/cache.h"
 
 constexpr int PREFETCH_DEGREE = 3;
-constexpr int LLC_PREFETCH_EXTRA_DEGREE = 3;
+constexpr int LLC_PREFETCH_DEGREE = 3;
 
 struct tracker_entry {
   uint64_t ip = 0;              // the IP we're tracking
@@ -84,10 +84,7 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
       // add to LLC table, but only prefetch lines of higher degree than the one used in L1
       if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0) {
         CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
-        uint64_t llc_cl_addr = cl_addr + (PREFETCH_DEGREE - 1) * (stride << LOG2_BLOCK_SIZE);
-        // do not exceed current page
-        if (virtual_prefetch || (cl_addr >> LOG2_PAGE_SIZE) == (llc_cl_addr >> LOG2_PAGE_SIZE))
-          lookahead[LLC] = {llc_cl_addr, stride, LLC_PREFETCH_EXTRA_DEGREE};
+        lookahead[LLC] = {cl_addr, stride, LLC_PREFETCH_DEGREE};
       }
     }
   } else {
