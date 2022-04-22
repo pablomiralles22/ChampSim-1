@@ -287,6 +287,8 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
     else
       fwd_pkt.to_return.clear();
 
+    if (IS_CACHE_LEVEL("LLC")) fwd_pkt.pf_metadata |= MISSED_IN_LLC;
+
     bool success;
     if (prefetch_as_load || handle_pkt.type != PREFETCH)
       success = lower_level->add_rq(fwd_pkt);
@@ -461,6 +463,8 @@ bool CACHE::add_rq(const PACKET& packet)
   RQ.push_back(packet);
   RQ.back().forward_checked = false;
   RQ.back().event_cycle = current_cycle + (warmup_complete[packet.cpu] ? HIT_LATENCY : 0);
+  if (IS_CACHE_LEVEL("L1D"))
+    RQ.back().pf_metadata |= DEMANDED_TO_L1;
 
   if constexpr (champsim::debug_print) {
     std::cout << " ADDED" << std::endl;
@@ -493,6 +497,8 @@ bool CACHE::add_wq(const PACKET& packet)
   WQ.push_back(packet);
   WQ.back().forward_checked = false;
   WQ.back().event_cycle = current_cycle + (warmup_complete[packet.cpu] ? HIT_LATENCY : 0);
+  if (IS_CACHE_LEVEL("L1D"))
+    WQ.back().pf_metadata |= DEMANDED_TO_L1;
 
   if constexpr (champsim::debug_print) {
     std::cout << " ADDED" << std::endl;
@@ -618,6 +624,12 @@ void CACHE::return_data(const PACKET& packet)
   mshr_entry->data = packet.data;
   mshr_entry->pf_metadata = packet.pf_metadata;
   mshr_entry->event_cycle = current_cycle + (warmup_complete[cpu] ? FILL_LATENCY : 0);
+
+  if (warmup_complete[cpu] && IS_CACHE_LEVEL("L1D") && (mshr_entry->pf_metadata & DEMANDED_TO_L1)) 
+    std::cerr << mshr_entry->ip << "," 
+              << mshr_entry->v_address << ","
+              << mshr_entry->address << ","
+              << ((mshr_entry->pf_metadata & MISSED_IN_LLC) > 0) << "\n";
 
   if constexpr (champsim::debug_print) {
     std::cout << "[" << NAME << "_MSHR] " << __func__ << " instr_id: " << mshr_entry->instr_id;
