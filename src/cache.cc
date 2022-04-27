@@ -2,14 +2,18 @@
 
 #include <algorithm>
 #include <iterator>
+#include <vector>
 
 #include "champsim.h"
 #include "champsim_constants.h"
 #include "util.h"
 #include "vmem.h"
+#include <_types/_uintmax_t.h>
 
 extern VirtualMemory vmem;
 extern uint8_t warmup_complete[NUM_CPUS];
+
+extern std::vector<PACKET> llc_misses;
 
 void CACHE::handle_fill()
 {
@@ -626,10 +630,11 @@ void CACHE::return_data(const PACKET& packet)
   mshr_entry->event_cycle = current_cycle + (warmup_complete[cpu] ? FILL_LATENCY : 0);
 
   if (warmup_complete[cpu] && IS_CACHE_LEVEL("L1D") && (mshr_entry->pf_metadata & DEMANDED_TO_L1)) 
-    std::cerr << mshr_entry->ip << "," 
-              << mshr_entry->v_address << ","
-              << mshr_entry->address << ","
-              << ((mshr_entry->pf_metadata & MISSED_IN_LLC) > 0) << "\n";
+    llc_misses.push_back(*mshr_entry);
+    // std::cerr << mshr_entry->ip << ","
+    //           << mshr_entry->v_address << ","
+    //           << mshr_entry->address << ","
+    //           << ((mshr_entry->pf_metadata & MISSED_IN_LLC) > 0) << "\n";
 
   if constexpr (champsim::debug_print) {
     std::cout << "[" << NAME << "_MSHR] " << __func__ << " instr_id: " << mshr_entry->instr_id;

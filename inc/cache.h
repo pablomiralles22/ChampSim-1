@@ -1,17 +1,18 @@
 #ifndef CACHE_H
 #define CACHE_H
 
-// Bits to collect memory accesses that miss in LLC
-#define DEMANDED_TO_L1 1
-#define MISSED_IN_LLC 2
-// Macro to make code cleaner, works inside the CACHE class
-#define IS_CACHE_LEVEL(name) (NAME.length() >= name.length() && NAME.compare(NAME.length() - name.length(), name.length(), name) == 0)
 
 #include <deque>
 #include <functional>
 #include <list>
 #include <string>
 #include <vector>
+
+// Bits to collect memory accesses that miss in LLC
+#define DEMANDED_TO_L1 1
+#define MISSED_IN_LLC 2
+// Macro to make code cleaner, works inside the CACHE class
+#define IS_CACHE_LEVEL(name) (NAME.length() >= std::string(name).length() && NAME.compare(NAME.length() - std::string(name).length(), std::string(name).length(), name) == 0)
 
 #include "champsim_constants.h"
 #include "delay_queue.hpp"

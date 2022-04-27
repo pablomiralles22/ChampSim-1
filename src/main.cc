@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <string.h>
 #include <vector>
+#include <map>
 
 #include "cache.h"
 #include "champsim.h"
@@ -23,6 +24,8 @@ uint8_t warmup_complete[NUM_CPUS] = {}, simulation_complete[NUM_CPUS] = {}, all_
 uint64_t warmup_instructions = 1000000, simulation_instructions = 10000000;
 
 auto start_time = time(NULL);
+
+std::vector<PACKET> llc_misses;
 
 // For backwards compatibility with older module source.
 champsim::deprecated_clock_cycle current_core_cycle;
@@ -498,6 +501,12 @@ int main(int argc, char** argv)
   print_dram_stats();
   print_branch_stats();
 #endif
+
+  std::map<uint64_t, int> cnt;
+  for(PACKET &p : llc_misses)
+    cnt[p.ip]++;
+  for(auto &[ip, count] : cnt)
+    std::cerr << ip << " " << count << "\n";
 
   return 0;
 }
