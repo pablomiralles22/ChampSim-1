@@ -8,7 +8,6 @@
 #include "champsim_constants.h"
 #include "util.h"
 #include "vmem.h"
-#include <_types/_uintmax_t.h>
 
 extern VirtualMemory vmem;
 extern uint8_t warmup_complete[NUM_CPUS];
