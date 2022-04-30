@@ -332,6 +332,9 @@ bool CACHE::filllike_miss(std::size_t set, std::size_t way, PACKET& handle_pkt)
   }
 
   bool bypass = (way == NUM_WAY);
+#ifdef LLC_BYPASS
+  bypass |= (IS_CACHE_LEVEL("LLC") && handle_pkt.type == PREFETCH);
+#endif
   assert(handle_pkt.type != WRITEBACK || !bypass);
 
   BLOCK& fill_block = block[set * NUM_WAY + way];
@@ -631,10 +634,6 @@ void CACHE::return_data(const PACKET& packet)
 
   if (warmup_complete[cpu] && IS_CACHE_LEVEL("L1D") && (mshr_entry->pf_metadata & DEMANDED_TO_L1)) 
     llc_misses.push_back(*mshr_entry);
-    // std::cerr << mshr_entry->ip << ","
-    //           << mshr_entry->v_address << ","
-    //           << mshr_entry->address << ","
-    //           << ((mshr_entry->pf_metadata & MISSED_IN_LLC) > 0) << "\n";
 
   if constexpr (champsim::debug_print) {
     std::cout << "[" << NAME << "_MSHR] " << __func__ << " instr_id: " << mshr_entry->instr_id;

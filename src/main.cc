@@ -502,11 +502,12 @@ int main(int argc, char** argv)
   print_branch_stats();
 #endif
 
-  std::map<uint64_t, int> cnt;
-  for(PACKET &p : llc_misses)
-    cnt[p.ip]++;
-  for(auto &[ip, count] : cnt)
-    std::cerr << ip << " " << count << "\n";
+  // std::map<uint64_t, int> cnt;
+  // for(PACKET &p : llc_misses)
+  //   if(p.pf_metadata & MISSED_IN_LLC)
+  //     cnt[p.ip]++;
+  // for(auto &[ip, count] : cnt)
+  //   std::cerr << ip << " " << count << "\n";
 
   return 0;
 }

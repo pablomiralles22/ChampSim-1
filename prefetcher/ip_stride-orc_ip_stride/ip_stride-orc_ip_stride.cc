@@ -43,7 +43,7 @@ void CACHE::prefetcher_cycle_operate()
   }
 
   // Orchestrate LLC ip_stride prefetching
-  if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0) {
+  if (IS_CACHE_LEVEL("L1D")) {
     CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
     if (auto [old_pf_address, stride, degree] = lookahead[LLC]; degree > 0) {
       auto pf_address = old_pf_address + (stride << LOG2_BLOCK_SIZE);
@@ -82,7 +82,7 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
     if (stride != 0 && stride == found->last_stride) {
       lookahead[this] = {cl_addr, stride, PREFETCH_DEGREE};
       // add to LLC table, but only prefetch lines of higher degree than the one used in L1
-      if (NAME.length() >= 3 && NAME.compare(NAME.length() - 3, 3, "L1D") == 0) {
+      if (IS_CACHE_LEVEL("L1D")) {
         CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
         lookahead[LLC] = {cl_addr, stride, LLC_PREFETCH_DEGREE};
       }
