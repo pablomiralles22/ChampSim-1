@@ -13,7 +13,7 @@
 #define MISSED_IN_LLC 2
 // Macro to make code cleaner, works inside the CACHE class
 #define IS_CACHE_LEVEL(name) (NAME.length() >= std::string(name).length() && NAME.compare(NAME.length() - std::string(name).length(), std::string(name).length(), name) == 0)
-#define LLC_BYPASS 1
+// #define LLC_BYPASS 1
 
 #include "champsim_constants.h"
 #include "delay_queue.hpp"
