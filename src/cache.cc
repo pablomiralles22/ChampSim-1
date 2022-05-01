@@ -332,7 +332,7 @@ bool CACHE::filllike_miss(std::size_t set, std::size_t way, PACKET& handle_pkt)
 
   bool bypass = (way == NUM_WAY);
 #ifdef LLC_BYPASS
-  bypass |= (IS_CACHE_LEVEL("LLC") && handle_pkt.type == PREFETCH && handle_pkt.to_return.empty());
+  bypass |= (IS_CACHE_LEVEL("LLC") && handle_pkt.type == PREFETCH && handle_pkt.pf_origin_level != fill_level);
 #endif
   assert(handle_pkt.type != WRITEBACK || !bypass);
 
