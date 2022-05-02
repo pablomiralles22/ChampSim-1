@@ -12,7 +12,8 @@
 extern VirtualMemory vmem;
 extern uint8_t warmup_complete[NUM_CPUS];
 
-extern std::vector<PACKET> llc_misses;
+extern std::vector<PACKET> l1_demand_miss;
+extern long long l1_demand_acc;
 
 void CACHE::handle_fill()
 {
@@ -222,7 +223,17 @@ void CACHE::readlike_hit(std::size_t set, std::size_t way, PACKET& handle_pkt)
   if (should_activate_prefetcher(handle_pkt.type) && handle_pkt.pf_origin_level < fill_level) {
     cpu = handle_pkt.cpu;
     uint64_t pf_base_addr = (virtual_prefetch ? handle_pkt.v_address : handle_pkt.address) & ~bitmask(match_offset_bits ? 0 : OFFSET_BITS);
+#ifdef LLC_ORC
+    if(!IS_CACHE_LEVEL("LLC"))
+      handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 1, handle_pkt.type, handle_pkt.pf_metadata);
+
+    if(IS_CACHE_LEVEL("L1D")) {
+      CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
+      LLC->impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 1, handle_pkt.type, handle_pkt.pf_metadata);
+    }
+#else
     handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 1, handle_pkt.type, handle_pkt.pf_metadata);
+#endif
   }
 
   // update replacement policy
@@ -290,7 +301,7 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
     else
       fwd_pkt.to_return.clear();
 
-    if (IS_CACHE_LEVEL("LLC")) fwd_pkt.pf_metadata |= MISSED_IN_LLC;
+    fwd_pkt.pf_metadata |= (0x1 << fill_level);
 
     bool success;
     if (prefetch_as_load || handle_pkt.type != PREFETCH)
@@ -313,7 +324,17 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
   if (should_activate_prefetcher(handle_pkt.type) && handle_pkt.pf_origin_level < fill_level) {
     cpu = handle_pkt.cpu;
     uint64_t pf_base_addr = (virtual_prefetch ? handle_pkt.v_address : handle_pkt.address) & ~bitmask(match_offset_bits ? 0 : OFFSET_BITS);
-    handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 0, handle_pkt.type, handle_pkt.pf_metadata);
+#ifdef LLC_ORC
+    if(!IS_CACHE_LEVEL("LLC"))
+      handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 1, handle_pkt.type, handle_pkt.pf_metadata);
+
+    if(IS_CACHE_LEVEL("L1D")) {
+      CACHE* LLC = (CACHE*)((CACHE*)lower_level)->lower_level;
+      LLC->impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 1, handle_pkt.type, handle_pkt.pf_metadata);
+    }
+#else
+    handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 1, handle_pkt.type, handle_pkt.pf_metadata);
+#endif
   }
 
   return true;
@@ -469,8 +490,10 @@ bool CACHE::add_rq(const PACKET& packet)
   RQ.push_back(packet);
   RQ.back().forward_checked = false;
   RQ.back().event_cycle = current_cycle + (warmup_complete[packet.cpu] ? HIT_LATENCY : 0);
-  if (IS_CACHE_LEVEL("L1D"))
+  if (IS_CACHE_LEVEL("L1D")) {
     RQ.back().pf_metadata |= DEMANDED_TO_L1;
+    l1_demand_acc++;
+  }
 
   if constexpr (champsim::debug_print) {
     std::cout << " ADDED" << std::endl;
@@ -632,7 +655,7 @@ void CACHE::return_data(const PACKET& packet)
   mshr_entry->event_cycle = current_cycle + (warmup_complete[cpu] ? FILL_LATENCY : 0);
 
   if (warmup_complete[cpu] && IS_CACHE_LEVEL("L1D") && (mshr_entry->pf_metadata & DEMANDED_TO_L1)) 
-    llc_misses.push_back(*mshr_entry);
+    l1_demand_miss.push_back(*mshr_entry);
 
   if constexpr (champsim::debug_print) {
     std::cout << "[" << NAME << "_MSHR] " << __func__ << " instr_id: " << mshr_entry->instr_id;

@@ -25,7 +25,8 @@ uint64_t warmup_instructions = 1000000, simulation_instructions = 10000000;
 
 auto start_time = time(NULL);
 
-std::vector<PACKET> llc_misses;
+std::vector<PACKET> l1_demand_miss;
+long long l1_demand_acc;
 
 // For backwards compatibility with older module source.
 champsim::deprecated_clock_cycle current_core_cycle;
@@ -502,12 +503,18 @@ int main(int argc, char** argv)
   print_branch_stats();
 #endif
 
-  // std::map<uint64_t, int> cnt;
-  // for(PACKET &p : llc_misses)
-  //   if(p.pf_metadata & MISSED_IN_LLC)
-  //     cnt[p.ip]++;
-  // for(auto &[ip, count] : cnt)
-  //   std::cerr << ip << " " << count << "\n";
+  long long l1_hit, l2_hit, llc_hit, llc_miss;
+  l2_hit = llc_hit = llc_miss = 0;
+
+  for(PACKET &p : l1_demand_miss)
+    if(!(p.pf_metadata & (1 << 5))) l2_hit++;
+    else if(!(p.pf_metadata & (1 << 6))) llc_hit++;
+    else llc_miss++;
+  l1_hit = l1_demand_acc - l1_demand_miss.size();
+
+  std::cerr << l1_demand_acc << " " << l1_hit  << " "
+            << l2_hit        << " " << llc_hit << " "
+            << llc_miss      << " " << "\n";
 
   return 0;
 }
