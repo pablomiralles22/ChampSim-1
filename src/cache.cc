@@ -301,7 +301,7 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
     else
       fwd_pkt.to_return.clear();
 
-    fwd_pkt.pf_metadata |= (0x1 << fill_level);
+    fwd_pkt.pf_metadata |= (0x1 << fill_level); // to know at which level it was returned
 
     bool success;
     if (prefetch_as_load || handle_pkt.type != PREFETCH)
@@ -317,8 +317,19 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
       auto it = MSHR.insert(std::end(MSHR), handle_pkt);
       it->cycle_enqueued = current_cycle;
       it->event_cycle = std::numeric_limits<uint64_t>::max();
+#ifdef IDEAL_LLC
+      mshr_entry = it;
+#endif
     }
   }
+
+#ifdef IDEAL_LLC
+  if (IS_CACHE_LEVEL("LLC") && mshr_entry != MSHR.end() && mshr_entry->type != WRITEBACK) {
+    for (auto ret : mshr_entry->to_return)
+      ret->return_data(*mshr_entry);
+    mshr_entry->to_return.clear();
+  }
+#endif
 
   // update prefetcher on load instructions and prefetches from upper levels
   if (should_activate_prefetcher(handle_pkt.type) && handle_pkt.pf_origin_level < fill_level) {
