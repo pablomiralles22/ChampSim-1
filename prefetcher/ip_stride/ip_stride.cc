@@ -5,6 +5,7 @@
 #include "cache.h"
 
 constexpr int PREFETCH_DEGREE = 3;
+constexpr int LLC_PREFETCH_DEGREE = 6;
 
 struct tracker_entry {
   uint64_t ip = 0;              // the IP we're tracking
@@ -67,7 +68,7 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
     // Initialize prefetch state unless we somehow saw the same address twice in
     // a row or if this is the first time we've seen this stride
     if (stride != 0 && stride == found->last_stride)
-      lookahead[this] = {cl_addr, stride, PREFETCH_DEGREE};
+      lookahead[this] = {cl_addr, stride, IS_CACHE_LEVEL("LLC") ? LLC_PREFETCH_DEGREE : PREFETCH_DEGREE};
   } else {
     // replace by LRU
     found = std::min_element(set_begin, set_end, [](tracker_entry x, tracker_entry y) { return x.last_used_cycle < y.last_used_cycle; });
