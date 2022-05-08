@@ -503,6 +503,7 @@ int main(int argc, char** argv)
   print_branch_stats();
 #endif
 
+  /*
   long long l1_hit, l2_hit, llc_hit, llc_miss;
   l2_hit = llc_hit = llc_miss = 0;
 
@@ -515,6 +516,7 @@ int main(int argc, char** argv)
   std::cerr << l1_demand_acc << " " << l1_hit  << " "
             << l2_hit        << " " << llc_hit << " "
             << llc_miss      << " " << "\n";
+   */
 
   return 0;
 }
