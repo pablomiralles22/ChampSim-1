@@ -623,6 +623,323 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
     }
   }
 
+
+
+
+  int last_berti = 0;
+  int berti = 0;
+  bool linnea_hits = false;
+  bool first_access = false;
+  bool full_access = false;
+  int stride = 0;
+  bool short_reuse = true;
+
+  // Find the entry in the current page table
+  uint64_t index = llc_get_current_pages_entry(page_addr);
+
+  bool recently_accessed = false;
+  if (index < LLC_CURRENT_PAGES_TABLE_ENTRIES) { // Hit in current page table
+    recently_accessed = llc_offset_requested_current_pages_table(index, offset);
+  }
+
+  if (index < LLC_CURRENT_PAGES_TABLE_ENTRIES  // Hit in current page table
+      && llc_current_pages_table[index].u_vector != 0) { // Used before
+
+    // Within the same page we always predict the same
+    last_berti = llc_current_pages_table[index].current_berti;
+    berti = last_berti;
+
+    // Update accessed block vector
+    llc_update_current_pages_table(index, offset);
+
+  } else { // First access to a new page
+
+    first_access = true;
+
+    // Find Berti and Linnea
+
+    // Check IP table
+    if (llc_ip_table[ip_index].current) { // Here we check for Berti and Linnea
+
+      int ip_pointer = llc_ip_table[ip_index].berti_or_pointer;
+      assert(ip_pointer < LLC_CURRENT_PAGES_TABLE_ENTRIES);
+      // It will be a change of page for the IP
+
+      // Get the last berti the IP is using and new berti to use
+      last_berti = llc_current_pages_table[ip_pointer].current_berti;
+      berti = llc_get_berti_current_pages_table(ip_pointer);
+
+      // Get if all blocks for a potential burst were accessed
+      full_access = llc_all_last_berti_accessed_bit_vector(llc_current_pages_table[ip_pointer].u_vector, berti);
+
+      // Make the link (linnea)
+      uint64_t last_page_addr = llc_current_pages_table[ip_pointer].page_addr;
+
+      short_reuse = (llc_count_bit_vector(llc_current_pages_table[ip_pointer].u_vector) > 2);
+      if (short_reuse) {
+        if (berti > 0 && last_page_addr + 1 == page_addr) {
+          llc_ip_table[ip_index].consecutive = true;
+        } else if (berti < 0 && last_page_addr == page_addr + 1) {
+          llc_ip_table[ip_index].consecutive = true;
+        } else { // Only add to record if not consecutive
+          llc_ip_table[ip_index].consecutive = false;
+          llc_add_record_pages_table(last_page_addr, page_addr);
+        }
+      } else {
+        if (llc_current_pages_table[ip_pointer].short_reuse) {
+          llc_current_pages_table[ip_pointer].short_reuse = false;
+        }
+        if (llc_record_pages_table.find(last_page_addr) != llc_record_pages_table.end()) {
+          if (!llc_record_pages_table[last_page_addr].short_reuse
+              && llc_record_pages_table[last_page_addr].linnea == page_addr) {
+            stride = llc_calculate_stride(llc_record_pages_table[last_page_addr].last_offset, offset);
+          }
+        }
+
+        if (!recently_accessed) { // If not accessed recently
+          llc_add_record_pages_table(last_page_addr, page_addr, offset, short_reuse);
+        }
+      }
+
+    } else {
+      berti = llc_ip_table[ip_index].berti_or_pointer;
+    }
+
+    if (index == LLC_CURRENT_PAGES_TABLE_ENTRIES) { // Miss in current page table
+
+      // Not found (linnea did not work or was not used -- berti == 0)
+
+      // Add new page entry evicting a previous one.
+      index = llc_evict_lru_current_page_entry();
+      llc_add_current_pages_table(index, page_addr);
+
+    } else { // First access, but linnea worked and blocks of the page have been prefetched
+      linnea_hits = true;
+    }
+
+    // Update accessed block vector
+    llc_update_current_pages_table(index, offset);
+
+  }
+
+  // Update berti
+  // Find berti distance from pref_latency cycles before
+  int berties[LLC_CURRENT_PAGES_TABLE_NUM_BERTI_PER_ACCESS]; 
+  unsigned saved_cycles[LLC_CURRENT_PAGES_TABLE_NUM_BERTI_PER_ACCESS]; 
+  llc_get_berti_prev_requests_table(index, offset, LLC_MISS_LATENCY, berties, saved_cycles, ooo_cpu[cpu]->current_cycle);
+  if (!recently_accessed) { // If not accessed recently
+    llc_add_berti_current_pages_table(index, berties, saved_cycles);
+  }	
+
+  // Set the new berti
+  if (!recently_accessed) { // If not accessed recently
+    if (short_reuse) {
+      llc_current_pages_table[index].current_berti = berti;
+    } else {
+      llc_current_pages_table[index].stride = stride;
+    }
+    llc_current_pages_table[index].short_reuse = short_reuse;
+
+    llc_add_prev_requests_table(index, offset, ooo_cpu[cpu]->current_cycle);
+
+    llc_ip_table[ip_index].current = true;
+    llc_ip_table[ip_index].berti_or_pointer = index;
+  }
+
+  if (berti != 0) {
+
+    // Burst mode
+    if ((first_access && full_access) || llc_current_pages_table[index].continue_burst) {
+      int burst_init = 0;
+      int burst_end = 0;
+      int burst_it = 0;
+      if (!linnea_hits || llc_current_pages_table[index].continue_burst) { // Linnea missed: full burst
+        llc_current_pages_table[index].continue_burst = false;
+        if (berti > 0) {
+          burst_init = offset + 1;
+          burst_end = offset + berti;
+          burst_it = 1;
+        } else {
+          burst_init = offset - 1;
+          burst_end = offset + berti;
+          burst_it = -1;
+        }
+      } else if (last_berti > 0 && berti > 0 && berti > last_berti) { // larger abs berti: semi burst
+        burst_init = last_berti;
+        burst_end = berti;
+        burst_it = 1;
+      } else if (last_berti < 0 && berti < 0 && berti < last_berti) { // larger abs berti: semi burst
+        burst_init = LLC_PAGE_OFFSET_MASK + last_berti;
+        burst_end = LLC_PAGE_OFFSET_MASK + berti;
+        burst_it = -1;
+      }
+      int bursts = 0;
+      for (int i = burst_init; i != burst_end; i += burst_it) {
+        if (i >= 0 && i < LLC_PAGE_BLOCKS) { // Burst are for the current page
+          uint64_t pf_line_addr = (page_addr << LLC_PAGE_BLOCKS_BITS) | i;
+          uint64_t pf_addr = pf_line_addr << LOG2_BLOCK_SIZE;
+          uint64_t pf_offset = pf_line_addr & LLC_PAGE_OFFSET_MASK;
+          // We are doing the berti here. Do not leave space for it
+          if (warmup_complete[cpu] && count < 2 && bursts < LLC_BURST_THROTTLING) { 
+            //if (ip_index == 0x10f) cout << "BURST PREFETCH " << hex << page_addr << dec << " <" << pf_offset << ">" << endl;
+            bool prefetched = prefetch_line(pf_addr, true, 1);
+            //assert(prefetched);
+            //llc_add_latencies_table(index, pf_offset, current_core_cycle[cpu]);
+            bursts++;
+            count++;
+          } else { // record last burst
+#ifdef CONTINUE_BURST
+            if (!recently_accessed) { // If not accessed recently
+              llc_current_pages_table[index].continue_burst = true;
+            }
+#endif
+            break;
+          }
+        }
+      }
+    }
+
+    // Berti mode
+    for (int i = 1; i <= LLC_BERTI_THROTTLING; i++) {
+
+      uint64_t pf_line_addr = line_addr + (berti * i);
+      uint64_t pf_addr = pf_line_addr << LOG2_BLOCK_SIZE;
+      uint64_t pf_page_addr = pf_line_addr >> LLC_PAGE_BLOCKS_BITS;
+      uint64_t pf_offset = pf_line_addr & LLC_PAGE_OFFSET_MASK;
+
+      // If the prefetcher will be done
+      if (warmup_complete[cpu] && count < 2) {
+
+        // Same page, prefetch standard
+        if (pf_page_addr == page_addr) { 
+          //if (ip_index == 0x10f) cout << "BERTI PREFETCH " << hex << page_addr << dec << " <" << pf_offset << ">" << endl;
+          bool prefetched = prefetch_line(pf_addr, true, 1);
+          //assert(prefetched);
+          //llc_add_latencies_table(index, pf_offset, current_core_cycle[cpu]);
+          count++;
+
+          // Out of page, try consecutive first
+        } else if (llc_ip_table[ip_index].consecutive && berti != 0) { 
+          uint64_t new_page;
+          if (berti < 0) {
+            new_page = page_addr - 1;
+          } else {
+            new_page = page_addr + 1;
+          }
+
+          // Need to add the linnea page to current pages
+          uint64_t new_index = llc_get_current_pages_entry(new_page);
+
+          if (new_index == LLC_CURRENT_PAGES_TABLE_ENTRIES) {
+
+            // Add new page entry evicting a previous one.
+            new_index = llc_evict_lru_current_page_entry();
+            llc_add_current_pages_table(new_index, new_page);
+
+          }
+
+          uint64_t pf_offset = (offset + berti + LLC_PAGE_BLOCKS) & LLC_PAGE_OFFSET_MASK;
+          uint64_t new_line = new_page << LLC_PAGE_BLOCKS_BITS;
+          uint64_t new_pf_line = new_line | pf_offset;
+          uint64_t new_addr = new_line << LOG2_BLOCK_SIZE;
+          uint64_t new_pf_addr = new_pf_line << LOG2_BLOCK_SIZE;
+
+          //cout << "CONSECUTIVE " << hex << new_page << " " << dec << pf_offset << hex << " " << " " << new_line << " " << new_pf_line << " " << new_addr << " " << new_pf_addr << dec << endl;
+
+          //if (ip_index == 0x10f) cout << "CONSECUTIVE PREFETCH " << hex << new_page << dec << " <" << pf_offset << ">" << endl;
+          bool prefetched = prefetch_line(new_pf_addr, true, 1);
+          //assert(prefetched);
+          //llc_add_latencies_table(new_index, pf_offset, current_core_cycle[cpu]);
+          count++;
+        } else { // Out of page, try Linnea
+#ifdef LINNEA
+          if (llc_record_pages_table.find(page_addr) != llc_record_pages_table.end()) { // Linnea found
+
+            uint64_t new_page = llc_record_pages_table[page_addr].linnea;
+
+            // Need to add the linnea page to current pages
+            uint64_t new_index = llc_get_current_pages_entry(new_page);
+
+            if (new_index == LLC_CURRENT_PAGES_TABLE_ENTRIES) {
+
+              // Add new page entry evicting a previous one.
+              new_index = llc_evict_lru_current_page_entry();
+              llc_add_current_pages_table(new_index, new_page);
+
+            }
+
+            uint64_t pf_offset = (offset + berti + LLC_PAGE_BLOCKS) & LLC_PAGE_OFFSET_MASK;
+            uint64_t new_line = new_page << LLC_PAGE_BLOCKS_BITS;
+            uint64_t new_pf_line = new_line | pf_offset;
+            uint64_t new_addr = new_line << LOG2_BLOCK_SIZE;
+            uint64_t new_pf_addr = new_pf_line << LOG2_BLOCK_SIZE;
+
+            //cout << "LINNEA " << hex << new_page << " " << dec << pf_offset << hex << " " << " " << new_line << " " << new_pf_line << " " << new_addr << " " << new_pf_addr << dec << endl;
+
+            //if (ip_index == 0x10f) cout << "LINNEA PREFETCH " << hex << new_page << dec << " <" << pf_offset << ">" << endl;
+            bool prefetched = prefetch_line(new_pf_addr, true, 1);
+            //assert(prefetched);
+            //llc_add_latencies_table(new_index, pf_offset, current_core_cycle[cpu]);
+            count++;
+          }
+#endif
+        }
+      }
+    }
+  }
+
+  if (!short_reuse) { // Use stride as it is a long reuse ip
+
+    assert(!llc_ip_table[ip_index].short_reuse || !llc_current_pages_table[index].short_reuse);
+
+    // If the prefetcher will be done
+    if (warmup_complete[cpu] && count < 2) {
+      if (llc_record_pages_table.find(page_addr) != llc_record_pages_table.end()) { // Linnea found
+
+        uint64_t new_page = llc_record_pages_table[page_addr].linnea;
+        uint64_t new_offset = llc_record_pages_table[page_addr].last_offset;
+        int new_stride;
+        int where;
+        if (!llc_current_pages_table[index].short_reuse) {
+          new_stride = llc_current_pages_table[index].stride;
+          where = 1;
+        } else {
+          assert(!llc_ip_table[ip_index].short_reuse);
+          where = 2;
+          new_stride = llc_ip_table[ip_index].berti_or_pointer;
+        }
+        //if (ip_index == 0x10f) cout << "LONG REUSE PREFETCH " << hex << page_addr << "->" << new_page << " " << ip_index << dec << " " << new_offset << " " << new_stride << " " << where << endl;
+
+        // Need to add the linnea page to current pages
+        uint64_t new_index = llc_get_current_pages_entry(new_page);
+
+        if (new_index == LLC_CURRENT_PAGES_TABLE_ENTRIES) {
+
+          // Add new page entry evicting a previous one.
+          new_index = llc_evict_lru_current_page_entry();
+          llc_add_current_pages_table(new_index, new_page);
+
+        }
+
+        uint64_t pf_offset = new_offset + new_stride;
+        if (pf_offset >= 0 && pf_offset < LLC_PAGE_BLOCKS) {
+          uint64_t new_line = new_page << LLC_PAGE_BLOCKS_BITS;
+          uint64_t new_pf_line = new_line | pf_offset;
+          uint64_t new_addr = new_line << LOG2_BLOCK_SIZE;
+          uint64_t new_pf_addr = new_pf_line << LOG2_BLOCK_SIZE;
+
+          //cout << "LINNEA " << hex << new_page << " " << dec << pf_offset << hex << " " << " " << new_line << " " << new_pf_line << " " << new_addr << " " << new_pf_addr << dec << endl;
+
+          //if (ip_index == 0x10f) cout << "STRIDE PREFETCH " << hex << new_page << dec << " <" << pf_offset << ">" << endl;
+          bool prefetched = prefetch_line(new_pf_addr, true, 0);
+          //assert(prefetched);
+          //llc_add_latencies_table(new_index, pf_offset, current_core_cycle[cpu]);
+          count++;
+        }
+      }
+    }
+  }
+
   return metadata_in;
 }
 

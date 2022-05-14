@@ -623,6 +623,15 @@ uint32_t CACHE::prefetcher_cache_operate(uint64_t addr, uint64_t ip, uint8_t cac
     }
   }
 
+  // Next line
+  if (count < DEGREE) {
+    bool prefetched = prefetch_line(addr + (1 << LOG2_BLOCK_SIZE), true, 0);
+    count++;
+  }
+  if (count < DEGREE) {
+    bool prefetched = prefetch_line(addr + (2 << LOG2_BLOCK_SIZE), true, 0);
+  }
+
   return metadata_in;
 }
 
