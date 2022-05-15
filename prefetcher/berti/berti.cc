@@ -7,11 +7,6 @@ using namespace std;
 
 #define DEGREE 2
 
-unordered_map<uint64_t, uint64_t> bere_cache;
-unordered_map<uint64_t, uint64_t> last_cache;
-
-uint64_t llc_last_block = 0;
-
 extern uint8_t warmup_complete[NUM_CPUS];
 extern std::array<O3_CPU*, NUM_CPUS> ooo_cpu;
 
@@ -20,69 +15,6 @@ extern std::array<O3_CPU*, NUM_CPUS> ooo_cpu;
 #define LLC_HIST_BUFFER_ENTRIES (2048 * 16)
 #define LLC_HIST_BUFFER_MASK (LLC_HIST_BUFFER_ENTRIES - 1)
 
-typedef struct __llc_hist_entry {
-  uint64_t tag;
-  uint64_t ip;
-  uint64_t time; 
-} llc_hist_entry;
-
-llc_hist_entry llc_hist_buffer[LLC_HIST_BUFFER_ENTRIES];
-uint64_t llc_hist_buffer_head; // log_2 (LLC_HIST_BUFFER_ENTRIES)
-
-void llc_hist_buffer_init() {
-  llc_hist_buffer_head = 0;
-  for (uint32_t i = 0; i < LLC_HIST_BUFFER_ENTRIES; i++) {
-    llc_hist_buffer[i].tag = 0;
-    llc_hist_buffer[i].ip = 0;
-    llc_hist_buffer[i].time = 0;
-  }
-}
-
-uint64_t llc_hist_buffer_find_entry(uint64_t line_addr, uint64_t ip) {
-  for (uint32_t count = 0, i = (llc_hist_buffer_head + LLC_HIST_BUFFER_MASK) % LLC_HIST_BUFFER_ENTRIES; count < LLC_HIST_BUFFER_ENTRIES; count++, i = (i + LLC_HIST_BUFFER_MASK) % LLC_HIST_BUFFER_ENTRIES) {
-    if (llc_hist_buffer[i].tag == line_addr && llc_hist_buffer[i].ip == ip) return i;
-  }
-  return LLC_HIST_BUFFER_ENTRIES;
-}
-
-// It can have duplicated entries if the line was evicted in between
-void llc_hist_buffer_add_entry(uint64_t line_addr, uint64_t ip, uint64_t cycle) {
-  // Allocate a new entry (evict old one if necessary)
-  llc_hist_buffer[llc_hist_buffer_head].tag = line_addr;
-  llc_hist_buffer[llc_hist_buffer_head].ip = ip;
-  llc_hist_buffer[llc_hist_buffer_head].time = cycle;
-  llc_hist_buffer_head = (llc_hist_buffer_head + 1) % LLC_HIST_BUFFER_ENTRIES;
-}
-
-// return bere (best request -- entangled address)
-uint64_t llc_hist_buffer_get_bere(uint64_t ip, uint64_t cycle, uint32_t skip = 0) {
-  uint32_t num_skipped = 0;
-  for (uint32_t count = 0, i = (llc_hist_buffer_head + LLC_HIST_BUFFER_MASK) % LLC_HIST_BUFFER_ENTRIES; count < LLC_HIST_BUFFER_ENTRIES; count++, i = (i + LLC_HIST_BUFFER_MASK) % LLC_HIST_BUFFER_ENTRIES) {
-    if (llc_hist_buffer[i].tag && llc_hist_buffer[i].ip == ip && cycle - llc_hist_buffer[i].time >= LLC_MISS_LATENCY) {
-      if (skip == num_skipped) {
-        return llc_hist_buffer[i].tag;
-      } else {
-        num_skipped++;
-      }
-    }
-  }
-  return 0;
-}
-
-// return bere (best request -- entangled address)
-uint64_t llc_hist_buffer_get_last(uint64_t ip, uint64_t cycle, uint32_t skip = 0) {
-  uint32_t num_skipped = 0;
-  for (uint32_t count = 0, i = (llc_hist_buffer_head + LLC_HIST_BUFFER_MASK) % LLC_HIST_BUFFER_ENTRIES; count < LLC_HIST_BUFFER_ENTRIES; count++, i = (i + LLC_HIST_BUFFER_MASK) % LLC_HIST_BUFFER_ENTRIES) {
-    if (llc_hist_buffer[i].tag && llc_hist_buffer[i].ip == ip) {
-      if (skip == num_skipped) {
-        return llc_hist_buffer[i].tag;
-      } else {
-        num_skipped++;
-      }
-    }
-  }
-  return 0;
-}
 
 /////////////////
 
